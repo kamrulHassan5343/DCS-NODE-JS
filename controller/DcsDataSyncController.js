@@ -84,105 +84,114 @@ class DcsDataSyncController {
                 return String(value);
         }
     }
+// Add this to your DcsDataSyncController.js file
+// Add this to your DcsDataSyncController.js file
 
-    async dcsDataSync(req, res) {
-        try {
-            const errors = validationResult(req);
-            if (!errors.isEmpty()) {
-                return res.json({ status: "E", message: errors.array().map(e => e.msg).join('\n') });
-            }
+// Add this to your DcsDataSyncController.js file
 
-            const {
-                branchCode,
-                BranchCode,
-                projectCode,
-                ProjectCode,
-                assignedpo,
-                pin,
-                lastSyncTime: inputLastSyncTime,
-                token: deviceToken = ''
-            } = req.body;
+async dcsDataSync(req, res) {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.json({ status: "E", message: errors.array().map(e => e.msg).join('\n') });
+        }
 
-            const token = req.headers['apikey'] || req.headers['apiKey'];
-            const appId = req.headers['appid'] || req.headers['appId'];
-            const appVersionCode = parseInt(req.headers['appversioncode'] || req.headers['appVersionCode']) || 0;
-            let lastSyncTime = inputLastSyncTime;
-            const currentTimes = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        const {
+            branchCode,
+            BranchCode,
+            projectCode,
+            ProjectCode,
+            assignedpo,
+            pin,
+            lastSyncTime: inputLastSyncTime,
+            token: deviceToken = ''
+        } = req.body;
 
-            logger.info(`Params - ${token}/${branchCode}/${appId}/${pin}/${lastSyncTime}/${projectCode}/${appVersionCode}`);
+        const token = req.headers['apikey'] || req.headers['apiKey'];
+        const appId = req.headers['appid'] || req.headers['appId'];
+        const appVersionCode = parseInt(req.headers['appversioncode'] || req.headers['appVersionCode']) || 0;
+        let lastSyncTime = inputLastSyncTime;
+        const currentTimes = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-            if (!branchCode || !projectCode || !pin) {
-                return res.json({ status: "E", message: "Missing required parameters: branchCode, projectCode, or pin" });
-            }
+        logger.info(`Params - ${token}/${branchCode}/${appId}/${pin}/${lastSyncTime}/${projectCode}/${appVersionCode}`);
 
-            if (lastSyncTime === "2000-01-01 00:00:00") {
-                const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-                lastSyncTime = sixtyDaysAgo.toISOString().slice(0, 19).replace('T', ' ');
-            }
+        if (!branchCode || !projectCode || !pin) {
+            return res.json({ status: "E", message: "Missing required parameters: branchCode, projectCode, or pin" });
+        }
 
-            // Version check
-            if ((appId === 'bmsmerp' && appVersionCode < 119) || (appId !== 'bmsmerp' && appVersionCode < 45)) {
-                return res.json(await MockService.message("দূঃখিত আপনি পুরাতন ভার্সন ব্যবহার করতেছেন।অনুগ্রহ করে নতুন ভার্সন ডাউনলোড করে নেন।"));
-            }
+        if (lastSyncTime === "2000-01-01 00:00:00") {
+            const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+            lastSyncTime = sixtyDaysAgo.toISOString().slice(0, 19).replace('T', ' ');
+        }
 
-            if (projectCode === '060') {
-                return res.json({ status: "E", message: "Project 060 requires special controller - not implemented yet" });
-            } else if (!['015', '279', '351', '104'].includes(projectCode)) {
-                return res.json(await MockService.message("Project Code Not Found!"));
-            }
+        // Version check
+        if ((appId === 'bmsmerp' && appVersionCode < 119) || (appId !== 'bmsmerp' && appVersionCode < 45)) {
+            return res.json(await MockService.message("দূঃখিত আপনি পুরাতন ভার্সন ব্যবহার করতেছেন।অনুগ্রহ করে নতুন ভার্সন ডাউনলোড করে নেন।"));
+        }
 
-            if (deviceToken !== '') {
-                logger.info(`Device Token - ${deviceToken}`);
-                await this.deviceTokenNotification(branchCode, projectCode, pin, deviceToken);
-            }
+        if (projectCode === '060') {
+            return res.json({ status: "E", message: "Project 060 requires special controller - not implemented yet" });
+        } else if (!['015', '279', '351', '104'].includes(projectCode)) {
+            return res.json(await MockService.message("Project Code Not Found!"));
+        }
 
-            // Fixed table mappings - use correct table names
-            const tableMappings = {
-                Configurationdata: 'celing_configs',
-                BankList: 'bank_info',
-                polist: 'polist',
-                loans: 'loans',
-                surveydata: 'surveys',
-                erpmemberlist: 'erp_member_info',
-                admissions: 'admissions'
-            };
+        if (deviceToken !== '') {
+            logger.info(`Device Token - ${deviceToken}`);
+            await this.deviceTokenNotification(branchCode, projectCode, pin, deviceToken);
+        }
 
-            // Initialize validation
-            if (!branchCode || !projectCode) {
-                return res.json({ status: "E", message: "Branch Code and Project Code are required" });
-            }
-            if (!lastSyncTime) {
-                lastSyncTime = '2000-01-01 00:00:00';
-            }
-            if (!token) {
-                return res.json({ status: "E", message: "API Key is required" });
-            }
-            if (!appId) {
-                return res.json({ status: "E", message: "App ID is required" });
-            }
-            if (!appVersionCode) {
-                return res.json({ status: "E", message: "App Version Code is required" });
-            }
+        // Fixed table mappings - use correct table names
+        const tableMappings = {
+            Configurationdata: 'celing_configs',
+            BankList: 'bank_info',
+            polist: 'polist',
+            loans: 'loans',
+            surveydata: 'surveys',
+            erpmemberlist: 'erp_member_info',
+            admissions: 'admissions'
+        };
 
-            const dataSetArray = {};
+        // Initialize validation
+        if (!branchCode || !projectCode) {
+            return res.json({ status: "E", message: "Branch Code and Project Code are required" });
+        }
+        if (!lastSyncTime) {
+            lastSyncTime = '2000-01-01 00:00:00';
+        }
+        if (!token) {
+            return res.json({ status: "E", message: "API Key is required" });
+        }
+        if (!appId) {
+            return res.json({ status: "E", message: "App ID is required" });
+        }
+        if (!appVersionCode) {
+            return res.json({ status: "E", message: "App Version Code is required" });
+        }
 
-            for (const [key, tableName] of Object.entries(tableMappings)) {
-                try {
-                    // Get proper column names
-                    const branchCodeCol = this.getColumnName(tableName, 'branchcode');
-                    const projectCodeCol = this.getColumnName(tableName, 'projectcode');
-                    const BranchCodeCol = this.getColumnName(tableName, 'BranchCode');
-                    const ProjectCodeCol = this.getColumnName(tableName, 'ProjectCode');
-                    const assignPoPinCol = this.getColumnName(tableName, 'assign_po_pin');
-                    const assignedpoCol = this.getColumnName(tableName, 'assignedpo');
-                    const updatedAtCol = this.getColumnName(tableName, 'updated_at');
+        const dataSetArray = {};
 
-                    // Build query based on table structure
-                    let query = '';
-                    const params = [];
-                    let paramIndex = 1;
+        for (const [key, tableName] of Object.entries(tableMappings)) {
+            try {
+                // Get proper column names
+                const branchCodeCol = this.getColumnName(tableName, 'branchcode');
+                const projectCodeCol = this.getColumnName(tableName, 'projectcode');
+                const BranchCodeCol = this.getColumnName(tableName, 'BranchCode');
+                const ProjectCodeCol = this.getColumnName(tableName, 'ProjectCode');
+                const assignPoPinCol = this.getColumnName(tableName, 'assign_po_pin');
+                const assignedpoCol = this.getColumnName(tableName, 'assignedpo');
+                const updatedAtCol = this.getColumnName(tableName, 'updated_at');
 
-                    if (tableName === 'bank_info') {
+                // Build query based on table structure
+                let query = '';
+                const params = [];
+                let paramIndex = 1;
+
+                if (tableName === 'celing_configs') {
+                    // Configuration data - usually doesn't need branch/project filtering
+                    query = `SELECT * FROM ${this.dbName}.${tableName}`;
+                    // No parameters needed for configuration data
+                }
+                        else if (tableName === 'bank_info') {
                         query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex}`;
                         params.push(this.castParameter(branchCode, 'string'));
                         paramIndex++;
@@ -192,74 +201,78 @@ class DcsDataSyncController {
                             params.push(this.castParameter(assignedpo, 'string'));
                             paramIndex++;
                         }
-                    } else if (tableName === 'polist') {
-                        query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
-                        params.push(this.castParameter(branchCode, 'string'));
-                        params.push(this.castParameter(projectCode, 'string'));
-                        paramIndex += 2;
-                    } else if (tableName === 'loans') {
-                        query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
-                        params.push(this.castParameter(branchCode, 'string'));
-                        params.push(this.castParameter(projectCode, 'string'));
-                        paramIndex += 2;
-                    } else if (tableName === 'surveys') {
-                        query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
-                        params.push(this.castParameter(branchCode, 'string'));
-                        params.push(this.castParameter(projectCode, 'string'));
-                        paramIndex += 2;
-                        
-                        if (assignedpo !== null && assignedpo !== undefined) {
-                            query += ` AND ${assignedpoCol} = $${paramIndex}`;
-                            params.push(this.castParameter(assignedpo, 'string'));
-                            paramIndex++;
-                        }
-                    } else if (tableName === 'erp_member_info') {
-                        // FIXED: Use double quotes for case-sensitive column names in PostgreSQL
-                        // query = `SELECT * FROM ${this.dbName}.${tableName} WHERE "${BranchCodeCol}" = ${paramIndex} AND "${ProjectCodeCol}" = ${paramIndex + 1}`;
-                        // params.push(this.castParameter(branchCode, 'string')); // Fixed: use branchCode
-                        // params.push(this.castParameter(projectCode, 'string')); // Fixed: use projectCode
-
-
-
-                        query = `SELECT * FROM ${this.dbName}.${tableName} WHERE "${BranchCodeCol}" = $1 AND "${ProjectCodeCol}" = $2`;
-params.push(this.castParameter(branchCode, 'string'));
-params.push(this.castParameter(projectCode, 'string'));
-                        paramIndex += 2;
-                    } else if (tableName === 'admissions') {
-                        query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
-                        params.push(this.castParameter(branchCode, 'string'));
-                        params.push(this.castParameter(projectCode, 'string'));
-                        paramIndex += 2;
-                        
-                        if (assignedpo !== null && assignedpo !== undefined) {
-                            query += ` AND ${assignedpoCol} = $${paramIndex}`;
-                            params.push(this.castParameter(assignedpo, 'string'));
-                            paramIndex++;
-                        }
+                } else if (tableName === 'polist') {
+                    query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
+                    params.push(this.castParameter(branchCode, 'string'));
+                    params.push(this.castParameter(projectCode, 'string'));
+                    paramIndex += 2;
+                } else if (tableName === 'loans') {
+                    query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
+                    params.push(this.castParameter(branchCode, 'string'));
+                    params.push(this.castParameter(projectCode, 'string'));
+                    paramIndex += 2;
+                } else if (tableName === 'surveys') {
+                    query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
+                    params.push(this.castParameter(branchCode, 'string'));
+                    params.push(this.castParameter(projectCode, 'string'));
+                    paramIndex += 2;
+                    
+                    if (assignedpo !== null && assignedpo !== undefined) {
+                        query += ` AND ${assignedpoCol} = $${paramIndex}`;
+                        params.push(this.castParameter(assignedpo, 'string'));
+                        paramIndex++;
                     }
+                } else if (tableName === 'erp_member_info') {
+                    query = `SELECT * FROM ${this.dbName}.${tableName} WHERE "${BranchCodeCol}" = $1 AND "${ProjectCodeCol}" = $2`;
+                    params.push(this.castParameter(branchCode, 'string'));
+                    params.push(this.castParameter(projectCode, 'string'));
+                    paramIndex += 2;
+                } else if (tableName === 'admissions') {
+                    query = `SELECT * FROM ${this.dbName}.${tableName} WHERE ${branchCodeCol} = $${paramIndex} AND ${projectCodeCol} = $${paramIndex + 1}`;
+                    params.push(this.castParameter(branchCode, 'string'));
+                    params.push(this.castParameter(projectCode, 'string'));
+                    paramIndex += 2;
+                    
+                    if (assignedpo !== null && assignedpo !== undefined) {
+                        query += ` AND ${assignedpoCol} = $${paramIndex}`;
+                        params.push(this.castParameter(assignedpo, 'string'));
+                        paramIndex++;
+                    }
+                }
 
+                // Only execute query if it's not empty
+                if (query.trim()) {
                     logger.info(`Query: ${query}, Params: ${JSON.stringify(params)}`);
                     const result = await db.query(query, params);
                     dataSetArray[key] = result || [];
-                } catch (err) {
-                    logger.warn(`Error fetching ${key}: ${err.message}`);
+                } else {
+                    logger.warn(`Empty query for table ${tableName}, skipping...`);
                     dataSetArray[key] = [];
                 }
+            } catch (err) {
+                logger.warn(`Error fetching ${key}: ${err.message}`);
+                dataSetArray[key] = [];
             }
-
-            return res.json({
-                status: "success",
-                time: currentTimes,
-                message: "Data synchronized successfully",
-                data: dataSetArray
-            });
-
-        } catch (error) {
-            logger.error('DCS Data Sync Error:', error);
-            return res.json(await MockService.message(error.message));
         }
-    }
 
+        // Log response size before compression for monitoring
+        const responseData = {
+            status: "success",
+            time: currentTimes,
+            message: "Data synchronized successfully",
+            data: dataSetArray
+        };
+
+        const jsonString = JSON.stringify(responseData);
+        logger.info(`Response size before compression: ${jsonString.length} bytes`);
+
+        return res.json(responseData);
+
+    } catch (error) {
+        logger.error('DCS Data Sync Error:', error);
+        return res.json(await MockService.message(error.message));
+    }
+}
     // FIXED: Removed duplicate parameters
     async deviceTokenNotification(branchCode, projectCode, cono, token) {
         try {
