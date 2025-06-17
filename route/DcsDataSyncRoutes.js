@@ -6,13 +6,6 @@ const { dcsDataSync, validationRules } = require("../controller/DcsDataSyncContr
 router.route("/DcsDataSync").post(validationRules, dcsDataSync);
 
 // Test endpoint to check if route is working
-router.get("/test", (req, res) => {
-    res.json({ 
-        status: "success", 
-        message: "Route is working", 
-        timestamp: new Date().toISOString() 
-    });
-});
 
 
 module.exports = router;

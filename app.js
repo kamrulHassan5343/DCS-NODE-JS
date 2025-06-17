@@ -9,6 +9,14 @@ const authRoute = require('./route/authRoute');
 
 // const activeSpecialSavingsProductsRoutes = require('./route/activeSpecialSavingsProductRoutes');
 const DcsDataSyncRoutes = require('./route/DcsDataSyncRoutes');
+const admissionDataStoreRoutes = require('./route/AdmissionDataStoreRoutes');
+const LoanRcaDataStoreRoutes = require('./route/LoanRcaDataStoreRoutes');
+const DocumentManagerRoutes = require('./route/DocumentManagerRoutes');
+const dcsInstallmentCalculatorRoutes = require('./route/dcsInstallmentCalculatorRoutes');
+
+const BmAdmissionAssessmentRoutes =  require('./route/BmAdmissionAssessmentRoutes');
+const BmLoanAssessmentRoutes = require('./route/BmLoanAssessmentRoutes');
+const SurveyDataStoreRoutes = require('./route/SurveyDataStoreRoutes');
 
 
 // Import Error Handling Utilities
@@ -26,6 +34,14 @@ app.use('/api/auth', authRoute);
 
 // app.use('/api', activeSpecialSavingsProductsRoutes); // for /activeSpecialSavingsProducts
 app.use('/api', DcsDataSyncRoutes); // for /DcsDataSync
+app.use('/api', admissionDataStoreRoutes); // for /admissionDataStore
+app.use('/api', LoanRcaDataStoreRoutes); // for /LoanRcaDataStore
+app.use('/api', DocumentManagerRoutes); // for /DocumentManager
+app.use("/api",dcsInstallmentCalculatorRoutes);
+app.use("/api",BmAdmissionAssessmentRoutes);
+app.use("/api",BmLoanAssessmentRoutes);
+app.use("/api",SurveyDataStoreRoutes);
+
 
 
 
