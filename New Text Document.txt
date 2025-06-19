@@ -1,100 +1,18 @@
-const { pool } = require('../config/config');
-const logger = require('../utils/logger');
+    const checkpointResult = await checkPointAdmission(
+        db,
+        data.vo_code,
+        data.pin,
+        data.erp_mem_id,
+        branchcode,
+        projectcode,
+        data.enroll_id,
+        flag
+    );
 
-exports.admissionStore = async (req, res) => {
-    try {
-        logger.info('Raw request body:', JSON.stringify(req.body));
 
-        let jsonData;
-        if (typeof req.body.json === 'string') {
-            try {
-                jsonData = JSON.parse(req.body.json);
-            } catch (parseError) {
-                logger.error('Failed to parse JSON:', parseError);
-                return res.status(400).json({ status: 'E', message: 'Invalid JSON format in request' });
-            }
-        } else if (typeof req.body.json === 'object') {
-            jsonData = req.body.json;
-        } else {
-            return res.status(400).json({ status: 'E', message: 'Invalid JSON data in request' });
-        }
 
-        const result = await processAdmissionData(req, jsonData);
-        return res.json(result);
 
-    } catch (error) {
-        logger.error('Admission store error:', error.message, error.stack);
-        return res.status(500).json({ status: 'E', message: error.message });
-    }
-};
 
-async function processAdmissionData(req, jsonData) {
-    const token = req.body.token;
-
-    logger.info('Admission Json Data:', JSON.stringify(jsonData));
-
-    const flag = jsonData.flag;
-    const data = jsonData.data[0];
-    const dynamicfieldvalue = jsonData.extra || null;
-    const biometricInfo = jsonData.biometric_info || null;
-
-    const projectcode = String(data.projectcode || '').padStart(3, '0');
-    const branchcode = String(data.branchcode || '').padStart(4, '0');
-    const currentTime = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
-    if (token !== '7f30f4491cb4435984616d1913e88389') {
-        return { status: 'E', message: "Token Invalid" };
-    }
-
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-
-        // Add checkpoint validation
-        const checkpointResult = await checkPointAdmission(
-            'dcs', // assuming db name is 'dcs' based on your queries
-            data.vo_code || data.orgno,
-            data.pin || data.assignedpo,
-            data.erp_mem_id,
-            branchcode,
-            projectcode,
-            data.enroll_id || data.entollmentid,
-            flag
-        );
-
-        // If checkpoint returns error, parse and return it
-        if (checkpointResult !== 'success') {
-            const errorResult = JSON.parse(checkpointResult);
-            await client.query('ROLLBACK');
-            return errorResult;
-        }
-
-        const admissionData = extractAdmissionData(data);
-        admissionData.projectcode = projectcode;
-        admissionData.branchcode = branchcode;
-        admissionData.DynamicFieldValue = dynamicfieldvalue;
-        admissionData.updated_at = currentTime;
-        admissionData.created_at = currentTime;
-
-        const doc_id = await saveAdmissionData(client, admissionData);
-
-        // Handle biometric data if present
-        await handleBiometricData(client, 'dcs', biometricInfo, branchcode, projectcode, admissionData);
-
-        await client.query('COMMIT');
-
-        return {
-            status: "S",
-            message: flag === 2 ? "Profile update request submitted successfully" : "Admission request submitted successfully"
-        };
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    } finally {
-        client.release();
-    }
-}
 
 async function checkPointAdmission(db, orgno, pin, erp_mem_id, branchcode, projectcode, enroll_id, flag) {
     if (flag !== '2') return 'success';
@@ -136,6 +54,23 @@ async function checkPointAdmission(db, orgno, pin, erp_mem_id, branchcode, proje
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function handleBiometricData(client, db, biometricInfo, branchcode, projectcode, admissionData) {
     if (!biometricInfo || biometricInfo === null) return;
 
@@ -171,19 +106,114 @@ async function handleBiometricData(client, db, biometricInfo, branchcode, projec
     }
 }
 
-// Helper function for ABM check - you'll need to implement this based on your business logic
-async function isAbm(branchcode, pin) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const { pool } = require('../config/config');
+const logger = require('../utils/logger');
+
+exports.admissionStore = async (req, res) => {
     try {
-        // Add your ABM checking logic here
-        // This is a placeholder - replace with actual implementation
-        const result = await pool.query(
-            `SELECT 1 FROM your_abm_table WHERE branchcode = $1 AND pin = $2`,
-            [branchcode, pin]
-        );
-        return result.rows.length > 0;
+        logger.info('Raw request body:', JSON.stringify(req.body));
+
+        let jsonData;
+        if (typeof req.body.json === 'string') {
+            try {
+                jsonData = JSON.parse(req.body.json);
+            } catch (parseError) {
+                logger.error('Failed to parse JSON:', parseError);
+                return res.status(400).json({ status: 'E', message: 'Invalid JSON format in request' });
+            }
+        } else if (typeof req.body.json === 'object') {
+            jsonData = req.body.json;
+        } else {
+            return res.status(400).json({ status: 'E', message: 'Invalid JSON data in request' });
+        }
+
+        const result = await processAdmissionData(req, jsonData);
+        return res.json(result);
+
     } catch (error) {
-        logger.error('Error checking ABM status:', error.message);
-        return false;
+        logger.error('Admission store error:', error.message, error.stack);
+        return res.status(500).json({ status: 'E', message: error.message });
+    }
+};
+
+async function processAdmissionData(req, jsonData) {
+    const token = req.body.token;
+
+    logger.info('Admission Json Data:', JSON.stringify(jsonData));
+
+    const flag = jsonData.flag;
+    const data = jsonData.data[0];
+    const dynamicfieldvalue = jsonData.extra || null;
+
+    const projectcode = String(data.projectcode || '').padStart(3, '0');
+    const branchcode = String(data.branchcode || '').padStart(4, '0');
+    const currentTime = new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+    if (token !== '7f30f4491cb4435984616d1913e88389') {
+        return { status: 'E', message: "Token Invalid" };
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const admissionData = extractAdmissionData(data);
+        admissionData.projectcode = projectcode;
+        admissionData.branchcode = branchcode;
+        admissionData.DynamicFieldValue = dynamicfieldvalue;
+        admissionData.updated_at = currentTime;
+        admissionData.created_at = currentTime;
+
+        const doc_id = await saveAdmissionData(client, admissionData);
+
+        await client.query('COMMIT');
+
+        return {
+            status: "S",
+            message: flag === 2 ? "Profile update request submitted successfully" : "Admission request submitted successfully"
+        };
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
     }
 }
 
@@ -286,7 +316,7 @@ function extractAdmissionData(data) {
         branchcode: data.branchcode || null,
         projectcode: data.projectcode || null,
         entollmentid: entollmentid,
-        orgno: data.orgno || data.vo_code || null,
+        orgno: data.orgno || null,
         assignedpo: data.assignedpo || data.pin || null,
         Flag: data.Flag || 1
     };
@@ -300,3 +330,21 @@ function isValidUUID(str) {
 module.exports = {
     admissionStore: exports.admissionStore
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

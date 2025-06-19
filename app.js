@@ -17,6 +17,18 @@ const dcsInstallmentCalculatorRoutes = require('./route/dcsInstallmentCalculator
 const BmAdmissionAssessmentRoutes =  require('./route/BmAdmissionAssessmentRoutes');
 const BmLoanAssessmentRoutes = require('./route/BmLoanAssessmentRoutes');
 const SurveyDataStoreRoutes = require('./route/SurveyDataStoreRoutes');
+const ProfileUpdateRoutes = require('./route/ProfileUpdateRoutes');
+const erp_member_listRoutes = require('./route/ErpMemberListRoutes');
+
+// loan_behaviour
+
+const LoanBehaviourRoutes = require('./route/LoanBehaviourRoutes');
+const LoanBehaviourDetailRoutes = require('./route/LoanBehaviourDetailRoutes');
+
+const SavingsBehaviourListRoutes = require('./route/SavingsBehaviourListRoutes');
+const SavingsBehaviourDetailRoutes = require('./route/SavingsBehaviourDetailsRoutes');
+
+const DPSBehaviourDetailRoutes = require('./route/DPSBehaviourDetailRoutes');
 
 
 // Import Error Handling Utilities
@@ -24,9 +36,11 @@ const AppError = require('./utils/appError');
 const globalErrorHandler = require('./controller/errorController');
 
 // Middlewares
-app.use(express.json()); // To parse JSON bodies
 
-app.use(express.urlencoded({ extended: true }));
+// Middleware to parse JSON with larger limit
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 
 
 // Mount Routes
@@ -41,11 +55,13 @@ app.use("/api",dcsInstallmentCalculatorRoutes);
 app.use("/api",BmAdmissionAssessmentRoutes);
 app.use("/api",BmLoanAssessmentRoutes);
 app.use("/api",SurveyDataStoreRoutes);
-
-
-
-
-
+app.use("/api",ProfileUpdateRoutes);
+app.use("/api", erp_member_listRoutes); // for /erp_member_list
+app.use("/api", LoanBehaviourRoutes); // for /loan_behaviour_list
+app.use("/api", LoanBehaviourDetailRoutes); // for /loan_behaviour_details
+app.use("/api", SavingsBehaviourListRoutes); // for /savings_behaviour_list
+app.use("/api", SavingsBehaviourDetailRoutes); // for /savings_behaviour_details
+app.use("/api", DPSBehaviourDetailRoutes); // for /dps_behaviour_details
 
 
 
