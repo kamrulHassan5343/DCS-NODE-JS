@@ -7,7 +7,7 @@ const app = express();
 // Import Routes
 const authRoute = require('./route/authRoute');
 
-// const activeSpecialSavingsProductsRoutes = require('./route/activeSpecialSavingsProductRoutes');
+
 const DcsDataSyncRoutes = require('./route/DcsDataSyncRoutes');
 const admissionDataStoreRoutes = require('./route/AdmissionDataStoreRoutes');
 const LoanRcaDataStoreRoutes = require('./route/LoanRcaDataStoreRoutes');
@@ -30,6 +30,8 @@ const SavingsBehaviourListRoutes = require('./route/SavingsBehaviourListRoutes')
 const SavingsBehaviourDetailRoutes = require('./route/SavingsBehaviourDetailsRoutes');
 
 const DPSBehaviourDetailRoutes = require('./route/DPSBehaviourDetailRoutes');
+const SavingsTransactionRoute = require('./route/SavingsTransactionRoute');
+const NidVerificationRoutes = require('./route/NidVerificationRoutes');
 
 
 // Import Error Handling Utilities
@@ -64,6 +66,8 @@ app.use("/api", LoanBehaviourDetailRoutes); // for /loan_behaviour_details
 app.use("/api", SavingsBehaviourListRoutes); // for /savings_behaviour_list
 app.use("/api", SavingsBehaviourDetailRoutes); // for /savings_behaviour_details
 app.use("/api", DPSBehaviourDetailRoutes); // for /dps_behaviour_details
+app.use("/api", SavingsTransactionRoute); // for /savingsTransaction
+app.use("/api", NidVerificationRoutes); // for /nid_verification
 
 
 
