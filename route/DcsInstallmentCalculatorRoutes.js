@@ -1,6 +1,6 @@
 const router = require("express").Router(); 
-const ApiControllerVersion = require("../controller/ApiControllerVersion"); 
+const DcsInstallmentCalculatorController = require("../controller/DcsInstallmentCalculatorController"); 
 
-router.post("/dcs_installment_calculator", ApiControllerVersion.postDcsInstallmentCalculator); 
+router.post("/dcs_installment_calculator", DcsInstallmentCalculatorController.postDcsInstallmentCalculator); 
 
 module.exports = router;

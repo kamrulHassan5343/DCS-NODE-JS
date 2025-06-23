@@ -1,6 +1,8 @@
 const { pool } = require('../config/config');
 const logger = require('../utils/logger');
+const crypto = require('crypto');
 
+// Entry point: POST /api/admission_store
 exports.admissionStore = async (req, res) => {
     try {
         logger.info('Raw request body:', JSON.stringify(req.body));
@@ -28,15 +30,13 @@ exports.admissionStore = async (req, res) => {
     }
 };
 
+
 async function processAdmissionData(req, jsonData) {
     const token = req.body.token;
-
-    logger.info('Admission Json Data:', JSON.stringify(jsonData));
 
     const flag = jsonData.flag;
     const data = jsonData.data[0];
     const dynamicfieldvalue = jsonData.extra || null;
-    const biometricInfo = jsonData.biometric_info || null;
 
     const projectcode = String(data.projectcode || '').padStart(3, '0');
     const branchcode = String(data.branchcode || '').padStart(4, '0');
@@ -50,25 +50,6 @@ async function processAdmissionData(req, jsonData) {
     try {
         await client.query('BEGIN');
 
-        // Add checkpoint validation
-        const checkpointResult = await checkPointAdmission(
-            'dcs', // assuming db name is 'dcs' based on your queries
-            data.vo_code || data.orgno,
-            data.pin || data.assignedpo,
-            data.erp_mem_id,
-            branchcode,
-            projectcode,
-            data.enroll_id || data.entollmentid,
-            flag
-        );
-
-        // If checkpoint returns error, parse and return it
-        if (checkpointResult !== 'success') {
-            const errorResult = JSON.parse(checkpointResult);
-            await client.query('ROLLBACK');
-            return errorResult;
-        }
-
         const admissionData = extractAdmissionData(data);
         admissionData.projectcode = projectcode;
         admissionData.branchcode = branchcode;
@@ -78,10 +59,8 @@ async function processAdmissionData(req, jsonData) {
 
         const doc_id = await saveAdmissionData(client, admissionData);
 
-        // Handle biometric data if present
-        await handleBiometricData(client, 'dcs', biometricInfo, branchcode, projectcode, admissionData);
-
         await client.query('COMMIT');
+        logger.info('Transaction committed. Doc ID:', doc_id);
 
         return {
             status: "S",
@@ -90,11 +69,13 @@ async function processAdmissionData(req, jsonData) {
 
     } catch (error) {
         await client.query('ROLLBACK');
+        logger.error('Transaction rolled back:', error.message);
         throw error;
     } finally {
         client.release();
     }
 }
+
 
 async function checkPointAdmission(db, orgno, pin, erp_mem_id, branchcode, projectcode, enroll_id, flag) {
     if (flag !== '2') return 'success';
@@ -188,77 +169,79 @@ async function isAbm(branchcode, pin) {
 }
 
 async function saveAdmissionData(client, data) {
-    try {
-        const existing = await client.query(
-            `SELECT "id" FROM "dcs"."admissions" WHERE "branchcode" = $1 AND "assignedpo" = $2 AND "orgno" = $3 AND "entollmentid" = $4`,
-            [data.branchcode, data.assignedpo, data.orgno, data.entollmentid]
-        );
+    logger.info('Preparing to save admission data:', data);
 
-        if (existing.rows.length > 0) {
-            const updateQuery = `
-                UPDATE "dcs"."admissions" SET 
-                    "IsRefferal" = $1, "RefferedById" = $2, "MemberId" = $3, "MemberCateogryId" = $4,
-                    "ApplicantsName" = $5, "MainIdTypeId" = $6, "IdNo" = $7, "DOB" = $8,
-                    "MotherName" = $9, "FatherName" = $10, "Phone" = $11, "PresentAddress" = $12,
-                    "PermanentAddress" = $13, "MaritalStatusId" = $14, "Occupation" = $15, "NomineeName" = $16,
-                    "GenderId" = $17, "SavingsProductId" = $18, "branchcode" = $19, "projectcode" = $20,
-                    "DynamicFieldValue" = $21, "updated_at" = $22
-                 WHERE "id" = $23`;
+    const existing = await client.query(
+        `SELECT "id" FROM "dcs"."admissions" WHERE "branchcode" = $1 AND "assignedpo" = $2 AND "orgno" = $3 AND "entollmentid" = $4`,
+        [data.branchcode, data.assignedpo, data.orgno, data.entollmentid]
+    );
 
-            const updateValues = [
-                data.IsRefferal, data.RefferedById, data.MemberId, data.MemberCateogryId,
-                data.ApplicantsName, data.MainIdTypeId, data.IdNo, data.DOB,
-                data.MotherName, data.FatherName, data.Phone, data.PresentAddress,
-                data.PermanentAddress, data.MaritalStatusId, data.Occupation, data.NomineeName,
-                data.GenderId, data.SavingsProductId, data.branchcode, data.projectcode,
-                data.DynamicFieldValue, data.updated_at,
-                existing.rows[0].id
-            ];
+    if (existing.rows.length > 0) {
+        logger.info('Updating existing admission record:', existing.rows[0].id);
 
-            await client.query(updateQuery, updateValues);
-            return existing.rows[0].id;
-        } else {
-            const insertQuery = `
-                INSERT INTO "dcs"."admissions" (
-                    "IsRefferal", "RefferedById", "MemberId", "MemberCateogryId",
-                    "ApplicantsName", "MainIdTypeId", "IdNo", "DOB",
-                    "MotherName", "FatherName", "Phone", "PresentAddress",
-                    "PermanentAddress", "MaritalStatusId", "Occupation", "NomineeName",
-                    "GenderId", "SavingsProductId", "branchcode", "projectcode",
-                    "DynamicFieldValue", "created_at", "updated_at", "entollmentid", "orgno", "assignedpo",
-                    "status", "action", "reciverrole", "roleid", "Flag"
-                ) VALUES (
-                    $1, $2, $3, $4,
-                    $5, $6, $7, $8,
-                    $9, $10, $11, $12,
-                    $13, $14, $15, $16,
-                    $17, $18, $19, $20,
-                    $21, $22, $23, $24, $25, $26,
-                    'PENDING', 'CREATE', 1, 1, $27
-                ) RETURNING "id"`;
+        const updateQuery = `
+            UPDATE "dcs"."admissions" SET 
+                "IsRefferal" = $1, "RefferedById" = $2, "MemberId" = $3, "MemberCateogryId" = $4,
+                "ApplicantsName" = $5, "MainIdTypeId" = $6, "IdNo" = $7, "DOB" = $8,
+                "MotherName" = $9, "FatherName" = $10, "Phone" = $11, "PresentAddress" = $12,
+                "PermanentAddress" = $13, "MaritalStatusId" = $14, "Occupation" = $15, "NomineeName" = $16,
+                "GenderId" = $17, "SavingsProductId" = $18, "branchcode" = $19, "projectcode" = $20,
+                "DynamicFieldValue" = $21, "updated_at" = $22
+             WHERE "id" = $23`;
 
-            const insertValues = [
-                data.IsRefferal, data.RefferedById, data.MemberId, data.MemberCateogryId,
-                data.ApplicantsName, data.MainIdTypeId, data.IdNo, data.DOB,
-                data.MotherName, data.FatherName, data.Phone, data.PresentAddress,
-                data.PermanentAddress, data.MaritalStatusId, data.Occupation, data.NomineeName,
-                data.GenderId, data.SavingsProductId, data.branchcode, data.projectcode,
-                data.DynamicFieldValue, data.created_at, data.updated_at, data.entollmentid,
-                data.orgno, data.assignedpo,
-                data.Flag || 1
-            ];
+        const updateValues = [
+            data.IsRefferal, data.RefferedById, data.MemberId, data.MemberCateogryId,
+            data.ApplicantsName, data.MainIdTypeId, data.IdNo, data.DOB,
+            data.MotherName, data.FatherName, data.Phone, data.PresentAddress,
+            data.PermanentAddress, data.MaritalStatusId, data.Occupation, data.NomineeName,
+            data.GenderId, data.SavingsProductId, data.branchcode, data.projectcode,
+            data.DynamicFieldValue, data.updated_at,
+            existing.rows[0].id
+        ];
 
-            const result = await client.query(insertQuery, insertValues);
-            return result.rows[0].id;
-        }
-    } catch (dbError) {
-        logger.error('Database error in saveAdmissionData:', dbError.message);
-        throw new Error(`Database operation failed: ${dbError.message}`);
+        await client.query(updateQuery, updateValues);
+        return existing.rows[0].id;
+    } else {
+        logger.info('Inserting new admission record...');
+
+        const insertQuery = `
+            INSERT INTO "dcs"."admissions" (
+                "IsRefferal", "RefferedById", "MemberId", "MemberCateogryId",
+                "ApplicantsName", "MainIdTypeId", "IdNo", "DOB",
+                "MotherName", "FatherName", "Phone", "PresentAddress",
+                "PermanentAddress", "MaritalStatusId", "Occupation", "NomineeName",
+                "GenderId", "SavingsProductId", "branchcode", "projectcode",
+                "DynamicFieldValue", "created_at", "updated_at", "entollmentid", "orgno", "assignedpo",
+                "status", "action", "reciverrole", "roleid", "Flag"
+            ) VALUES (
+                $1, $2, $3, $4,
+                $5, $6, $7, $8,
+                $9, $10, $11, $12,
+                $13, $14, $15, $16,
+                $17, $18, $19, $20,
+                $21, $22, $23, $24, $25, $26,
+                'PENDING', 'CREATE', 1, 1, $27
+            ) RETURNING "id"`;
+
+        const insertValues = [
+            data.IsRefferal, data.RefferedById, data.MemberId, data.MemberCateogryId,
+            data.ApplicantsName, data.MainIdTypeId, data.IdNo, data.DOB,
+            data.MotherName, data.FatherName, data.Phone, data.PresentAddress,
+            data.PermanentAddress, data.MaritalStatusId, data.Occupation, data.NomineeName,
+            data.GenderId, data.SavingsProductId, data.branchcode, data.projectcode,
+            data.DynamicFieldValue, data.created_at, data.updated_at, data.entollmentid,
+            data.orgno, data.assignedpo,
+            data.Flag || 1
+        ];
+
+        const result = await client.query(insertQuery, insertValues);
+        logger.info('Insert successful. Inserted ID:', result.rows[0].id);
+        return result.rows[0].id;
     }
 }
 
+
 function extractAdmissionData(data) {
-    const crypto = require('crypto');
     let entollmentid = data.entollmentid;
     if (!entollmentid || !isValidUUID(entollmentid)) {
         entollmentid = crypto.randomUUID();
@@ -291,6 +274,12 @@ function extractAdmissionData(data) {
         Flag: data.Flag || 1
     };
 }
+
+function isValidUUID(str) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(str);
+}
+
 
 function isValidUUID(str) {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

@@ -12,8 +12,9 @@ const DcsDataSyncRoutes = require('./route/DcsDataSyncRoutes');
 const admissionDataStoreRoutes = require('./route/AdmissionDataStoreRoutes');
 const LoanRcaDataStoreRoutes = require('./route/LoanRcaDataStoreRoutes');
 const DocumentManagerRoutes = require('./route/DocumentManagerRoutes');
-const dcsInstallmentCalculatorRoutes = require('./route/dcsInstallmentCalculatorRoutes');
 
+const dcsInstallmentCalculatorRoutes = require('./route/dcsInstallmentCalculatorRoutes');
+const dcsInsurancePremiumCalculationRoutes = require('./route/DcsInsurancePremiumCalculationRoutes');
 const BmAdmissionAssessmentRoutes =  require('./route/BmAdmissionAssessmentRoutes');
 const BmLoanAssessmentRoutes = require('./route/BmLoanAssessmentRoutes');
 const SurveyDataStoreRoutes = require('./route/SurveyDataStoreRoutes');
@@ -52,6 +53,7 @@ app.use('/api', admissionDataStoreRoutes); // for /admissionDataStore
 app.use('/api', LoanRcaDataStoreRoutes); // for /LoanRcaDataStore
 app.use('/api', DocumentManagerRoutes); // for /DocumentManager
 app.use("/api",dcsInstallmentCalculatorRoutes);
+app.use("/api",dcsInsurancePremiumCalculationRoutes);
 app.use("/api",BmAdmissionAssessmentRoutes);
 app.use("/api",BmLoanAssessmentRoutes);
 app.use("/api",SurveyDataStoreRoutes);
