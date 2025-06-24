@@ -1,6 +1,6 @@
 const router = require("express").Router(); 
-const ApiControllerVersion = require("../controller/ApiControllerVersion"); 
+const BmAdmissionAssessmentController = require("../controller/BmAdmissionAssessmentController"); 
 
-router.post("/bm_admission_assessment", ApiControllerVersion.bmAdmissionAssessment); 
+router.post("/bm_admission_assessment", BmAdmissionAssessmentController.bmAdmissionAssessment); 
 
 module.exports = router;

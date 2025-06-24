@@ -5,9 +5,6 @@ const express = require('express');
 const app = express();
 
 // Import Routes
-const authRoute = require('./route/authRoute');
-
-
 const DcsDataSyncRoutes = require('./route/DcsDataSyncRoutes');
 const admissionDataStoreRoutes = require('./route/AdmissionDataStoreRoutes');
 const LoanRcaDataStoreRoutes = require('./route/LoanRcaDataStoreRoutes');
@@ -44,10 +41,6 @@ const globalErrorHandler = require('./controller/errorController');
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-
-
-// Mount Routes
-app.use('/api/auth', authRoute);
 
 // app.use('/api', activeSpecialSavingsProductsRoutes); // for /activeSpecialSavingsProducts
 app.use('/api', DcsDataSyncRoutes); // for /DcsDataSync

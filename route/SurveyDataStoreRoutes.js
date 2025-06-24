@@ -3,7 +3,6 @@ const SurveyDataStoreController = require("../controller/SurveyDataStoreControll
 
 router.post(
     "/survey_data_store", 
-    SurveyDataStoreController.validateSurveyData,
     SurveyDataStoreController.SurveyDataStore
 ); 
 
