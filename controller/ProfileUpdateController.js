@@ -5,74 +5,80 @@ exports.GetProfileUpdateData = async (req, res) => {
   const client = await pool.connect();
   try {
     const { branchcode, erp_member_id } = req.query;
+    logger.info(`Profile Update Request: branchcode=${branchcode}, erp_member_id=${erp_member_id}`);
 
-    logger.info(`📥 Profile Update Request: branchcode=${branchcode}, erp_member_id=${erp_member_id}`);
+    // Get base member data
+    const { rows } = await client.query(
+      `SELECT * FROM dcs.admissions 
+       WHERE branchcode = $1 AND "MemberId" = $2 AND erpstatus = 2 
+       ORDER BY id DESC LIMIT 1`,
+      [branchcode, erp_member_id]
+    );
 
-    const query = `
-      SELECT * FROM dcs.admissions 
-      WHERE branchcode = $1 AND "MemberId" = $2 AND erpstatus = 2 
-      ORDER BY id DESC LIMIT 1
-    `;
-
-    const result = await client.query(query, [branchcode, erp_member_id]);
-    if (result.rows.length === 0) {
+    if (!rows.length) {
       return res.status(400).json({
         status: 400,
-        data: "",
         message: `এই মেম্বারের কোন প্রোফাইল আপডেট পাওয়া যায় নাই। ইআরপি মেম্বার আইডি-${erp_member_id} Okey প্রেস করে সামনে এগিয়ে যেতে পারবেন।`
       });
     }
 
-    const row = result.rows[0];
-
-    // Helper to fetch single value
-    const getValue = async (table, column, where, params) => {
-      const q = `SELECT ${column} FROM dcs.${table} WHERE ${where} LIMIT 1`;
-      const r = await client.query(q, params);
-      return r.rows[0]?.[column] || null;
+    const member = rows[0];
+    
+    // Helper function to fetch additional data
+    const fetchData = async (table, column, condition, params) => {
+      const { rows } = await client.query(
+        `SELECT ${column} FROM dcs.${table} WHERE ${condition} LIMIT 1`,
+        params
+      );
+      return rows[0]?.[column] || null;
     };
 
-    // Enrich response
-    const enrichments = {
-      MemberCateogry: getValue('projectwise_member_category', 'categoryname', 'categoryid = $1', [row.membercateogryid]),
-      IsBkash: row.isbkash === '1' ? 'Yes' : 'No',
-      parmanentUpazila: getValue('office_mapping', 'thana_name', 'thana_id = $1 AND district_id = $2', [row.parmanentupazilaid, row.permanentdistrictid]),
-      presentUpazila: getValue('office_mapping', 'thana_name', 'thana_id = $1 AND district_id = $2', [row.presentupazilaid, row.presentdistrictid]),
-      mainidType: getValue('payload_data', 'data_name', "data_type = 'cardTypeId' AND data_id = $1", [row.mainidtypeid]),
-      role_name: getValue('role_hierarchies', 'designation', 'projectcode = $1 AND position = $2', [row.projectcode, row.roleid]),
-      reciverrole_name: getValue('role_hierarchies', 'designation', 'projectcode = $1 AND position = $2', [row.projectcode, row.reciverrole]),
-      Comment: getValue('document_history', 'comment', 'id = $1', [row.dochistory_id]),
-      OccupationId: row.occupation,
-      Occupation: getValue('payload_data', 'data_name', "data_type = 'occupationId' AND data_id = $1", [row.occupation]),
-      MaritalStatus: getValue('payload_data', 'data_name', "data_type = 'maritalStatusId' AND data_id = $1", [row.maritalstatusid]),
-      SpuseOccupation: getValue('payload_data', 'data_name', "data_type = 'occupationId' AND data_id = $1", [row.spuseoccupationid]),
-      Gender: getValue('payload_data', 'data_name', "data_type = 'genderId' AND data_id = $1", [row.genderid]),
-      NomineeNidTypeId: row.nomineenidtype,
-      NomineeNidType: getValue('payload_data', 'data_name', "data_type = 'cardTypeId' AND data_id = $1", [row.nomineenidtype]),
-      Relationship: getValue('payload_data', 'data_name', "data_type = 'relationshipId' AND data_id = $1", [row.relationshipid]),
-      IsSameAddress: row.issameaddress === '1' ? 'Yes' : 'No',
-      WalletOwnerId: row.walletowner,
-      WalletOwner: getValue('payload_data', 'data_name', "data_type = 'primaryEarner' AND data_id = $1", [row.walletowner]),
-      rocketNo: row.roket_number,
-      PrimaryEarnerId: row.primaryearner,
-      PrimaryEarner: getValue('payload_data', 'data_name', "data_type = 'primaryEarner' AND data_id = $1", [row.primaryearner])
-    };
+    // Define all additional data to fetch
+    const dataToFetch = [
+      { key: 'MemberCateogry', table: 'projectwise_member_category', column: 'categoryname', condition: 'categoryid = $1', params: [member.membercateogryid] },
+      { key: 'parmanentUpazila', table: 'office_mapping', column: 'thana_name', condition: 'thana_id = $1 AND district_id = $2', params: [member.parmanentupazilaid, member.permanentdistrictid] },
+      { key: 'presentUpazila', table: 'office_mapping', column: 'thana_name', condition: 'thana_id = $1 AND district_id = $2', params: [member.presentupazilaid, member.presentdistrictid] },
+      { key: 'mainidType', table: 'payload_data', column: 'data_name', condition: "data_type = 'cardTypeId' AND data_id = $1", params: [member.mainidtypeid] },
+      { key: 'role_name', table: 'role_hierarchies', column: 'designation', condition: 'projectcode = $1 AND position = $2', params: [member.projectcode, member.roleid] },
+      { key: 'reciverrole_name', table: 'role_hierarchies', column: 'designation', condition: 'projectcode = $1 AND position = $2', params: [member.projectcode, member.reciverrole] },
+      { key: 'Comment', table: 'document_history', column: 'comment', condition: 'id = $1', params: [member.dochistory_id] },
+      { key: 'Occupation', table: 'payload_data', column: 'data_name', condition: "data_type = 'occupationId' AND data_id = $1", params: [member.occupation] },
+      { key: 'MaritalStatus', table: 'payload_data', column: 'data_name', condition: "data_type = 'maritalStatusId' AND data_id = $1", params: [member.maritalstatusid] },
+      { key: 'SpuseOccupation', table: 'payload_data', column: 'data_name', condition: "data_type = 'occupationId' AND data_id = $1", params: [member.spuseoccupationid] },
+      { key: 'Gender', table: 'payload_data', column: 'data_name', condition: "data_type = 'genderId' AND data_id = $1", params: [member.genderid] },
+      { key: 'NomineeNidType', table: 'payload_data', column: 'data_name', condition: "data_type = 'cardTypeId' AND data_id = $1", params: [member.nomineenidtype] },
+      { key: 'Relationship', table: 'payload_data', column: 'data_name', condition: "data_type = 'relationshipId' AND data_id = $1", params: [member.relationshipid] },
+      { key: 'WalletOwner', table: 'payload_data', column: 'data_name', condition: "data_type = 'primaryEarner' AND data_id = $1", params: [member.walletowner] },
+      { key: 'PrimaryEarner', table: 'payload_data', column: 'data_name', condition: "data_type = 'primaryEarner' AND data_id = $1", params: [member.primaryearner] }
+    ];
 
-    // Resolve all async enrichment values
-    const enriched = await Promise.all(
-      Object.entries(enrichments).map(async ([key, val]) => [key, await val])
+    // Fetch all additional data in parallel
+    const additionalData = await Promise.all(
+      dataToFetch.map(async ({ key, ...query }) => ({
+        key,
+        value: await fetchData(query.table, query.column, query.condition, query.params)
+      }))
     );
 
-    // Build final response object
-    for (const [key, val] of enriched) {
-      row[key] = val;
-    }
+    // Add simple fields
+    member.IsBkash = member.isbkash === '1' ? 'Yes' : 'No';
+    member.IsSameAddress = member.issameaddress === '1' ? 'Yes' : 'No';
+    member.rocketNo = member.roket_number;
+    member.OccupationId = member.occupation;
+    member.NomineeNidTypeId = member.nomineenidtype;
+    member.PrimaryEarnerId = member.primaryearner;
+    member.WalletOwnerId = member.walletowner;
 
-    return res.status(200).json({ status: 200, data: row, message: "" });
+    // Merge all data
+    additionalData.forEach(({ key, value }) => {
+      member[key] = value;
+    });
+
+    return res.status(200).json({ status: 200, data: member });
 
   } catch (err) {
-    logger.error("❌ GetProfileUpdateData error:", err.message);
-    return res.status(500).json({ status: 500, data: "", message: "Server error." });
+    logger.error("GetProfileUpdateData error:", err);
+    return res.status(500).json({ status: 500, message: "Server error." });
   } finally {
     client.release();
   }

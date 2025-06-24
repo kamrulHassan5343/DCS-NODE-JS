@@ -2,188 +2,116 @@ const axios = require('axios');
 const { pool } = require('../config/config');
 const logger = require('../utils/logger');
 
+const API_KEY = '5d0a4a85-df7a-scapi-bits-93eb-145f6a9902ae';
 
+// Shared utility functions
+const validateParams = (params) => {
+  const rules = [
+    { field: 'orgno', max: 4 },
+    { field: 'orgmemno', max: 10 },
+    { field: 'branchcode', max: 4 },
+    { field: 'projectcode', max: 3 }
+  ];
 
+  const errors = rules
+    .filter(rule => params[rule.field] && params[rule.field].length > rule.max)
+    .map(rule => `${rule.field} must be max ${rule.max} characters`);
 
-
-// Controller: Loan Behaviour Details
-exports.GetLoanBehaviourDetails = async (req, res) => {
-  const params = {
-    branchcode: req.body.branchcode || req.query.branchcode,
-    projectcode: req.body.projectcode || req.query.projectcode,
-    orgno: req.body.orgno || req.query.orgno,
-    orgmemno: req.body.orgmemno || req.query.orgmemno,
-    loanno: req.body.loanno || req.query.loanno,
-  };
-
-  logger.info(`Loan Behaviour Details Request: ${JSON.stringify(params)}`);
-
-  // Validate request
-  const validation = validateRequest(params);
-  if (!validation.valid) {
-    return res.status(400).json(validation.response);
-  }
-
-  // Get Server URL
-  const serverResult = await getServerUrl();
-  if (serverResult.error) {
-    return res.status(400).json(serverResult.response);
-  }
-
-  const [url, url2] = serverResult.urls;
-  if (!url && !url2) {
-    return res.status(400).json({ status: 'CUSTMSG', message: 'Api Url Not Found' });
-  }
-
-  try {
-    const apiKey = '5d0a4a85-df7a-scapi-bits-93eb-145f6a9902ae';
-    const queryParams = new URLSearchParams({
-      ProjectCode: params.projectcode || '',
-      BranchCode: params.branchcode || '',
-      LoanNo: params.loanno || '',
-      key: apiKey
-    });
-
-    if (params.orgno) {
-      queryParams.append('OrgNo', params.orgno);
-    }
-    if (params.orgmemno) {
-      queryParams.append('OrgMemNo', params.orgmemno);
-    }
-
-    const finalUrl = `${url}LoanBehavior?${queryParams.toString()}`;
-    logger.info(`Calling LoanBehavior API: ${finalUrl}`);
-
-    const response = await axios.get(finalUrl);
-    return res.status(200).json(response.data);
-  } catch (error) {
-    logger.error('Error fetching Loan Behavior Details:', error);
-    return res.status(500).json({ status: 'E', message: 'Failed to fetch loan behavior details.' });
-  }
+  return errors.length ? { valid: false, errors } : { valid: true };
 };
 
-
-
-
-
-
-// Utility: Validate request parameters
-const validateRequest = (params) => {
-  const errors = [];
-
-  if (params.orgno && params.orgno.length > 4) {
-    errors.push('orgno must be max 4 characters.');
-  }
-  if (params.orgmemno && params.orgmemno.length > 10) {
-    errors.push('orgmemno must be max 10 characters.');
-  }
-  if (params.branchcode && params.branchcode.length > 4) {
-    errors.push('branchcode must be max 4 characters.');
-  }
-  if (params.projectcode && params.projectcode.length > 3) {
-    errors.push('projectcode must be max 3 characters.');
-  }
-
-  if (errors.length > 0) {
-    return {
-      valid: false,
-      response: { status: 'E', message: errors.join('\n') }
-    };
-  }
-  return { valid: true };
-};
-
-// Utility: Fetch server URL
-const getServerUrl = async () => {
+const getActiveServerUrl = async () => {
   try {
-    const result = await pool.query(
-      `SELECT * FROM dcs.server_url WHERE server_status = 3 AND status = 1 LIMIT 1`
-    );
+    const { rows: [server] } = await pool.query(`
+      SELECT url, maintenance_status, maintenance_message 
+      FROM dcs.server_url 
+      WHERE server_status = 3 AND status = 1 
+      LIMIT 1
+    `);
 
-    if (result.rows.length === 0) {
-      return {
-        error: true,
-        response: { status: 'CUSTMSG', message: 'Api Url Not Found' }
-      };
-    }
-
-    const server = result.rows[0];
-
-    if (server.maintenance_status === '1') {
-      return {
-        error: true,
-        response: { status: 'CUSTMSG', message: server.maintenance_message }
-      };
-    }
-
-    return {
-      error: false,
-      urls: [server.url, server.url2]
-    };
+    if (!server) return { error: 'API URL not found' };
+    if (server.maintenance_status === '1') return { error: server.maintenance_message };
+    
+    return { url: server.url };
   } catch (err) {
-    logger.error('Database error fetching server_url:', err);
-    return {
-      error: true,
-      response: { status: 'CUSTMSG', message: 'Error retrieving server URL from database.' }
-    };
+    logger.error('Database error:', err);
+    return { error: 'Failed to get server URL' };
   }
 };
 
-// Controller: Loan Behaviour
-exports.GetLoanBehaviour = async (req, res) => {
-  const params = {
-    orgno: req.body.orgno || req.query.orgno,
-    orgmemno: req.body.orgmemno || req.query.orgmemno,
-    branchcode: req.body.branchcode || req.query.branchcode,
-    projectcode: req.body.projectcode || req.query.projectcode
-  };
+const buildApiUrl = (basePath, params, requiredFields = []) => {
+  const missingFields = requiredFields.filter(field => !params[field]);
+  if (missingFields.length) {
+    return { error: `Missing required fields: ${missingFields.join(', ')}` };
+  }
 
-  logger.info(`Loan Behaviour Request: ${JSON.stringify(params)}`);
+  const query = new URLSearchParams({
+    ProjectCode: params.projectcode || '',
+    BranchCode: params.branchcode || '',
+    key: API_KEY,
+    ...(params.orgno && { OrgNo: params.orgno }),
+    ...(params.orgmemno && { OrgMemNo: params.orgmemno }),
+    ...(params.loanno && { LoanNo: params.loanno })
+  });
 
-  // Validate
-  const validation = validateRequest(params);
+  return { url: `${basePath}?${query}` };
+};
+
+// Controllers
+exports.GetLoanBehaviourDetails = async (req, res) => {
+  const params = { ...req.body, ...req.query };
+  logger.info('Loan Behaviour Details Request:', params);
+
+  const validation = validateParams(params);
   if (!validation.valid) {
-    return res.status(400).json(validation.response);
+    return res.status(400).json({ status: 'E', message: validation.errors.join('\n') });
   }
 
-  // Get server URL
-  const serverResult = await getServerUrl();
-  if (serverResult.error) {
-    return res.status(400).json(serverResult.response);
+  const server = await getActiveServerUrl();
+  if (server.error) {
+    return res.status(400).json({ status: 'CUSTMSG', message: server.error });
   }
 
-  const [url, url2] = serverResult.urls;
-  if (!url && !url2) {
-    return res.status(400).json({ status: 'CUSTMSG', message: 'Api Url Not Found' });
+  const apiUrl = buildApiUrl(`${server.url}LoanBehavior`, params, ['loanno']);
+  if (apiUrl.error) {
+    return res.status(400).json({ status: 'E', message: apiUrl.error });
   }
 
   try {
-    const baseUrl = url;
-    const apiKey = '5d0a4a85-df7a-scapi-bits-93eb-145f6a9902ae';
-    const queryParams = new URLSearchParams({
-      ProjectCode: params.projectcode || '',
-      BranchCode: params.branchcode || '',
-      key: apiKey
-    });
-
-    if (params.orgno) {
-      queryParams.append('OrgNo', params.orgno);
-    }
-
-    if (params.orgmemno) {
-      queryParams.append('OrgMemNo', params.orgmemno);
-    }
-
-    const finalUrl = `${baseUrl}LoanDetails?${queryParams.toString()}`;
-    logger.info(`Requesting Loan Behaviour from: ${finalUrl}`);
-
-    const response = await axios.get(finalUrl);
-    return res.status(200).json(response.data);
+    logger.info('Calling API:', apiUrl.url);
+    const { data } = await axios.get(apiUrl.url);
+    return res.json(data);
   } catch (error) {
-    logger.error('Error fetching Loan Behaviour:', error);
-    return res.status(500).json({ status: 'E', message: 'Failed to fetch loan behavior data.' });
+    logger.error('API Error:', error.message);
+    return res.status(500).json({ status: 'E', message: 'Failed to fetch loan details' });
   }
 };
 
+exports.GetLoanBehaviour = async (req, res) => {
+  const params = { ...req.body, ...req.query };
+  logger.info('Loan Behaviour Request:', params);
 
+  const validation = validateParams(params);
+  if (!validation.valid) {
+    return res.status(400).json({ status: 'E', message: validation.errors.join('\n') });
+  }
 
+  const server = await getActiveServerUrl();
+  if (server.error) {
+    return res.status(400).json({ status: 'CUSTMSG', message: server.error });
+  }
+
+  const apiUrl = buildApiUrl(`${server.url}LoanDetails`, params);
+  if (apiUrl.error) {
+    return res.status(400).json({ status: 'E', message: apiUrl.error });
+  }
+
+  try {
+    logger.info('Calling API:', apiUrl.url);
+    const { data } = await axios.get(apiUrl.url);
+    return res.json(data);
+  } catch (error) {
+    logger.error('API Error:', error.message);
+    return res.status(500).json({ status: 'E', message: 'Failed to fetch loan behavior' });
+  }
+};

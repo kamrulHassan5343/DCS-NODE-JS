@@ -5,232 +5,163 @@ const axios = require('axios');
 
 class LiveApiNidVerificationService {
   constructor() {
-    this.db = 'dcs'; // Database name like in Laravel
+    this.token = null;
+    this.tokenExpiry = null;
   }
 
-  // Static method for external usage
   static async execute(req) {
-    const instance = new LiveApiNidVerificationService();
-    return await instance.nidVerify(req);
+    return await new LiveApiNidVerificationService().nidVerify(req);
   }
 
   async nidVerify(req) {
     try {
-      // 1. Validation (following Laravel's get_validated method)
-      const validation = await this.getValidated(req);
-      if (typeof validation === 'string') {
-        return validation; // Return validation error JSON string
-      }
+      // 1. Validate request
+      const validation = await this.validateRequest(req);
+      if (validation) return validation;
 
-      // 2. Get server URLs (following Laravel logic)
+      // 2. Get server URLs
       const serverUrls = await ServerURLService.server_url();
-      if (typeof serverUrls === 'string') {
-        return serverUrls; // Return error if server URL service fails
-      }
-      
-      // Validate that we have an array
-      if (!Array.isArray(serverUrls) || serverUrls.length === 0) {
-        const status = { status: "ERROR", message: "Invalid server URL configuration" };
-        return JSON.stringify(status);
+      if (!Array.isArray(serverUrls)) {  // Fixed the missing parenthesis here
+        return this.errorResponse("ERROR", "Invalid server URL configuration");
       }
       
       const [url, url2Raw] = serverUrls;
-      
-      // Use first URL if second URL is empty (fallback logic)
-      const url2 = url2Raw && url2Raw.trim() !== '' ? url2Raw : url;
+      const url2 = url2Raw?.trim() || url;
 
-      // 3. Get server token (following Laravel logic)
-      const serverTokenArray = await TokenCheckService.check_token();
-      const serverToken = serverTokenArray?.token || serverTokenArray;
-      
+      // 3. Get or refresh token
+      let serverToken;
+      try {
+        const tokenResult = await TokenCheckService.check_token();
+        serverToken = tokenResult?.token || tokenResult;
+      } catch (tokenError) {
+        console.error('Token check failed:', tokenError);
+        return this.errorResponse("CUSTMSG", "Token Not Found");
+      }
+
       if (!serverToken) {
-        const status = { status: "CUSTMSG", message: "Token Not Found" };
-        return JSON.stringify(status);
+        return this.errorResponse("CUSTMSG", "Token Not Found");
       }
 
-      // 4. Extract request parameters (following Laravel parameter extraction)
-      const type = req.body?.type || req.query?.type;
-      const idno = req.body?.IdNo || req.query?.IdNo;
-      const appId = req.body?.appId || req.query?.appId;
-      const versionCode = req.body?.versionCode || req.query?.versionCode || '';
-      const voCode1 = req.body?.voCode || req.query?.voCode;
-      const orgMemNo = req.body?.orgMemNo || req.query?.orgMemNo;
-      const pin = req.body?.pin || req.query?.pin;
-      const branchCode = req.body?.branchCode || req.query?.branchCode;
+      // 4. Extract parameters
+      const params = Object.assign({}, req.query, req.body);
+      const { type, IdNo: idno, versionCode = '', voCode: voCode1, orgMemNo, pin, branchCode } = params;
 
-      // 5. Debug and validate parameters before building URL
-      console.log("Debug - Parameters received:");
-      console.log("- url (first):", url);
-      console.log("- url2Raw (second):", url2Raw);
-      console.log("- url2 (final):", url2);
-      console.log("- type:", type);
-      console.log("- idno:", idno);
-      console.log("- serverUrls array:", serverUrls);
-
-      // Validate required parameters
-      if (!url2 || url2.trim() === '') {
-        throw new Error("Base URL (url2) is missing or empty after fallback");
-      }
-      if (!type) {
-        throw new Error("Type parameter is missing or empty");
-      }
-      if (!idno) {
-        throw new Error("IdNo parameter is missing or empty");
+      if (!type || !idno) {
+        return this.errorResponse("ERROR", `${!type ? "Type" : "IdNo"} parameter is missing`);
       }
 
-      // Ensure url2 ends with proper separator
-      const baseUrl = url2.endsWith('/') ? url2 : url2 + '/';
+      // 5. Make API call
+      const baseUrl = url2.endsWith('/') ? url2 : `${url2}/`;
+      const apiUrl = `${baseUrl}dedupe-check?${type}=${idno}`;
       
-      // 5. Build API URL exactly like Laravel: url2 + "dedupe-check?" + type + "=" + idno
-      const url4 = `${baseUrl}dedupe-check?${type}=${idno}`;
-      console.log("Nid Verification URL:", url4);
-
-      // 6. Make API call with proper headers
-      const headers = {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${serverToken}`
-      };
-
-      const response = await axios.get(url4, {
-        headers,
+      const response = await axios.get(apiUrl, {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${serverToken}`
+        },
         timeout: 60000
       });
 
-      const outputClosed = response.data;
-      const httpCode = response.status;
-      console.log("Nid_Ser", JSON.stringify(outputClosed));
-
-      // 7. Process response following Laravel logic
-      const jsondecodeNID = outputClosed;
-      console.log("API Response:", JSON.stringify(jsondecodeNID));
-
-      if (versionCode !== '') {
-        // When versionCode is provided, follow Laravel's complex logic
-        if (jsondecodeNID != null) {
-          const suspectMemberjsondecode = jsondecodeNID.suspectedMember;
-          
-          if (suspectMemberjsondecode && Array.isArray(suspectMemberjsondecode) && suspectMemberjsondecode.length > 0) {
-            const branchcode = suspectMemberjsondecode[0].branchCode;
-            const po = suspectMemberjsondecode[0].assignedPoPin;
-            const voCode = suspectMemberjsondecode[0].voCode || '';
-            const memberName = suspectMemberjsondecode[0].memberName;
-            const memberNo = suspectMemberjsondecode[0].memberNo;
-
-            // Get PO info from database
-            const poInfo = await this.getPoInfo(po, branchcode);
-            const poname = poInfo ? poInfo.coname : '';
-
-            // Get branch info from database
-            const branchInfo = await this.getBranchInfo(branchcode);
-            let branchname = '', areaname = '', regionname = '', divisionname = '';
-            if (branchInfo) {
-              branchname = branchInfo.branch_name;
-              areaname = branchInfo.area_name;
-              regionname = branchInfo.region_name;
-              divisionname = branchInfo.division_name;
-            }
-
-            // Get PO phone from database
-            const contactInfo = await this.getContactInfo(branchcode);
-            const phoneno = contactInfo ? contactInfo.official_mobile : '';
-
-            // Check if branch code, pin, or voCode don't match (Laravel condition)
-            if (branchcode !== branchCode || pin !== po || voCode !== voCode1) {
-              const datasetNID = {
-                status: httpCode,
-                [type]: jsondecodeNID[type] || idno, // Use original ID if API doesn't return it
-                suspectedMember: `দুঃখিত, আপনার প্রদত্ত এনআইডি/স্মার্টকার্ড/জন্ম নিবন্ধন/পাসপোর্ট নম্বরটি দিয়ে ব্র্যাকের নিম্নোক্ত শাখায় সদস্য ভর্তি আছে।\n\nবিভাগ: ${divisionname}\nঅঞ্চল: ${regionname}\nএলাকা: ${areaname}\nশাখা: ${branchname}\nশাখা কোড: ${branchcode}\nভিও কোড: ${voCode}\nসদস্য নম্বর: ${memberNo}\nসদস্য নাম: ${memberName}\nপিও'র নাম: ${poname}\nপিও'র পিন: ${po}\nশাখায় যোগাযোগের নম্বর:${phoneno}`
-              };
-              return JSON.stringify(datasetNID);
-            } else {
-              const datasetNID = {
-                status: httpCode,
-                [type]: jsondecodeNID[type] || idno, // Use original ID if API doesn't return it
-                suspectedMember: ""
-              };
-              return JSON.stringify(datasetNID);
-            }
-          } else {
-            // No suspected members found
-            const datasetNID = {
-              status: httpCode,
-              [type]: jsondecodeNID[type] || idno, // Use original ID if API doesn't return it
-              suspectedMember: ""
-            };
-            return JSON.stringify(datasetNID);
-          }
-        } else {
-          const datasetNID = {
-            status: httpCode,
-            [type]: "",
-            suspectedMember: ""
-          };
-          return JSON.stringify(datasetNID);
-        }
-      } else {
-        // When versionCode is not provided, return original response
-        if (jsondecodeNID != null) {
-          const datasetNID = {
-            status: httpCode,
-            [type]: jsondecodeNID[type] || idno, // Use original ID if API doesn't return it
-            suspectedMember: jsondecodeNID.suspectedMember || ""
-          };
-          return JSON.stringify(datasetNID);
-        } else {
-          const datasetNID = {
-            status: httpCode,
-            [type]: "",
-            suspectedMember: []
-          };
-          return JSON.stringify(datasetNID);
-        }
-      }
+      // 6. Process response
+      return this.processResponse(response, { 
+        type, idno, versionCode, voCode1, pin, branchCode 
+      });
 
     } catch (error) {
       console.error('NID verification failed:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      
-      if (error.response) {
-        // HTTP error response
-        const httpCode = error.response.status;
-        const datasetNID = {
-          status: httpCode,
-          message: error.response.data?.message || `API Error: ${error.message}`,
-          suspectedMember: ""
-        };
-        return JSON.stringify(datasetNID);
-      } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
-        // DNS or connection error
-        const datasetNID = {
-          status: "ERROR",
-          message: `Connection Error: ${error.message}`,
-          suspectedMember: ""
-        };
-        return JSON.stringify(datasetNID);
-      } else {
-        // Other errors (including Invalid URL)
-        const datasetNID = {
-          status: "ERROR",
-          message: `Error: ${error.message}`,
-          suspectedMember: ""
-        };
-        return JSON.stringify(datasetNID);
-      }
+      return this.handleError(error);
     }
   }
 
-  // Database helper methods (you'll need to implement database connection)
+  async processResponse(response, params) {
+    const { data: apiData, status: httpCode } = response;
+    const { type, idno, versionCode, voCode1, pin, branchCode } = params;
+
+    if (!apiData) return this.formatResponse(httpCode, type, "", []);
+
+    if (!versionCode) {
+      return this.formatResponse(
+        httpCode, 
+        type, 
+        apiData[type] || idno, 
+        apiData.suspectedMember || ""
+      );
+    }
+
+    const suspects = apiData.suspectedMember || [];
+    if (!suspects.length) return this.formatResponse(httpCode, type, apiData[type] || idno, "");
+
+    const suspect = suspects[0];
+    if (suspect.branchCode !== branchCode || pin !== suspect.assignedPoPin || suspect.voCode !== voCode1) {
+      const { branchInfo, poInfo, contactInfo } = await this.getSuspectDetails(suspect);
+      
+      const message = `দুঃখিত, আপনার প্রদত্ত এনআইডি/স্মার্টকার্ড/জন্ম নিবন্ধন/পাসপোর্ট নম্বরটি দিয়ে ব্র্যাকের নিম্নোক্ত শাখায় সদস্য ভর্তি আছে।\n\n` +
+        `বিভাগ: ${branchInfo?.division_name}\n` +
+        `অঞ্চল: ${branchInfo?.region_name}\n` +
+        `এলাকা: ${branchInfo?.area_name}\n` +
+        `শাখা: ${branchInfo?.branch_name}\n` +
+        `শাখা কোড: ${suspect.branchCode}\n` +
+        `ভিও কোড: ${suspect.voCode}\n` +
+        `সদস্য নম্বর: ${suspect.memberNo}\n` +
+        `সদস্য নাম: ${suspect.memberName}\n` +
+        `পিও'র নাম: ${poInfo?.coname}\n` +
+        `পিও'র পিন: ${suspect.assignedPoPin}\n` +
+        `শাখায় যোগাযোগের নম্বর:${contactInfo?.official_mobile}`;
+
+      return this.formatResponse(httpCode, type, apiData[type] || idno, message);
+    }
+
+    return this.formatResponse(httpCode, type, apiData[type] || idno, "");
+  }
+
+  async getSuspectDetails(suspect) {
+    const [branchInfo, poInfo, contactInfo] = await Promise.all([
+      this.getBranchInfo(suspect.branchCode),
+      this.getPoInfo(suspect.assignedPoPin, suspect.branchCode),
+      this.getContactInfo(suspect.branchCode)
+    ]);
+    return { branchInfo, poInfo, contactInfo };
+  }
+
+  formatResponse(status, type, idValue, suspectedMember) {
+    return JSON.stringify({ status, [type]: idValue, suspectedMember });
+  }
+
+  errorResponse(status, message) {
+    return JSON.stringify({ status, message });
+  }
+
+  async validateRequest(req) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const message = errors.array().map(e => e.msg).join("\n");
+      return this.errorResponse("E", message);
+    }
+    return null;
+  }
+
+  handleError(error) {
+    if (error.response) {
+      return this.formatResponse(
+        error.response.status,
+        "",
+        "",
+        error.response.data?.message || `API Error: ${error.message}`
+      );
+    }
+    return this.errorResponse(
+      error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' ? "ERROR" : "ERROR",
+      error.code ? `Connection Error: ${error.message}` : `Error: ${error.message}`
+    );
+  }
+
+  // Database methods
   async getPoInfo(po, branchcode) {
     try {
       // Replace with your actual database connection
       const connection = await this.getDatabaseConnection();
       const [rows] = await connection.execute(
-        `SELECT coname FROM ${this.db}.polist WHERE cono = ? AND branchcode = ?`,
+        `SELECT coname FROM dcs.polist WHERE cono = ? AND branchcode = ?`,
         [po, branchcode]
       );
       await connection.end();
@@ -263,7 +194,7 @@ class LiveApiNidVerificationService {
       const connection = await this.getDatabaseConnection();
       const [rows] = await connection.execute(
         `SELECT official_mobile 
-         FROM ${this.db}.contacts_info 
+         FROM dcs.contacts_info 
          WHERE branchcode = ? AND project = 'Dabi'`,
         [parseInt(branchcode)]
       );
@@ -275,28 +206,10 @@ class LiveApiNidVerificationService {
     }
   }
 
-  
-  // Validation method following Laravel's get_validated logic
-  async getValidated(req) {
-    const arrayToValidate = {
-      // Add validation rules as needed - Laravel had them commented out
-      // type: 'nullable|string',
-      // IdNo: 'nullable|string',
-      // appId: 'nullable|string',
-      // versionCode: 'nullable|string',
-    };
-
-    // Since Laravel validation was mostly empty, we'll do basic validation
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      let message = '';
-      errors.array().forEach(error => {
-        message += error.msg + "\n";
-      });
-      return JSON.stringify({ status: "E", message: message });
-    }
-
-    return true;
+  async getDatabaseConnection() {
+    // Implement your database connection logic here
+    // Example: return await mysql.createConnection(config);
+    throw new Error('Database connection method not implemented');
   }
 }
 
