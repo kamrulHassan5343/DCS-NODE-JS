@@ -1,32 +1,21 @@
 const { pool } = require('../config/config');
 const logger = require('../utils/logger');
 
-exports.GetProfileUpdateData = async (req, res, next) => {
+exports.GetProfileUpdateData = async (req, res) => {
   const client = await pool.connect();
   try {
     const { branchcode, erp_member_id } = req.query;
-    const db = 'dcs';
 
-    logger.info(`Profile Update Request: branchcode=${branchcode}, erp_member_id=${erp_member_id}`);
+    logger.info(`📥 Profile Update Request: branchcode=${branchcode}, erp_member_id=${erp_member_id}`);
 
-    // Main admission data
-    // const admissionQuery = `
-    //   SELECT * FROM ${db}.admissions 
-    //   WHERE branchcode = $1 AND MemberId = $2 AND erpstatus = 2 
-    //   ORDER BY id DESC LIMIT 1
-    // `;
-
-    const admissionQuery = `
+    const query = `
       SELECT * FROM dcs.admissions 
       WHERE branchcode = $1 AND "MemberId" = $2 AND erpstatus = 2 
       ORDER BY id DESC LIMIT 1
     `;
 
-
-
-    const admissionResult = await client.query(admissionQuery, [branchcode, erp_member_id]);
-
-    if (admissionResult.rows.length === 0) {
+    const result = await client.query(query, [branchcode, erp_member_id]);
+    if (result.rows.length === 0) {
       return res.status(400).json({
         status: 400,
         data: "",
@@ -34,52 +23,56 @@ exports.GetProfileUpdateData = async (req, res, next) => {
       });
     }
 
-    let result = admissionResult.rows[0];
+    const row = result.rows[0];
 
-    // Helper function
-    const getSingleValue = async (table, column, whereClause, params) => {
-      const query = `SELECT ${column} FROM ${db}.${table} WHERE ${whereClause} LIMIT 1`;
-      const data = await client.query(query, params);
-      return data.rows[0]?.[column] || null;
+    // Helper to fetch single value
+    const getValue = async (table, column, where, params) => {
+      const q = `SELECT ${column} FROM dcs.${table} WHERE ${where} LIMIT 1`;
+      const r = await client.query(q, params);
+      return r.rows[0]?.[column] || null;
     };
 
-    result.MemberCateogry = await getSingleValue('projectwise_member_category', 'categoryname', 'categoryid = $1', [result.membercateogryid]);
-    result.IsBkash = result.isbkash === '1' ? 'Yes' : 'No';
-    result.parmanentUpazila = await getSingleValue('office_mapping', 'thana_name', 'thana_id = $1 AND district_id = $2', [result.parmanentupazilaid, result.permanentdistrictid]);
-    result.presentUpazila = await getSingleValue('office_mapping', 'thana_name', 'thana_id = $1 AND district_id = $2', [result.presentupazilaid, result.presentdistrictid]);
+    // Enrich response
+    const enrichments = {
+      MemberCateogry: getValue('projectwise_member_category', 'categoryname', 'categoryid = $1', [row.membercateogryid]),
+      IsBkash: row.isbkash === '1' ? 'Yes' : 'No',
+      parmanentUpazila: getValue('office_mapping', 'thana_name', 'thana_id = $1 AND district_id = $2', [row.parmanentupazilaid, row.permanentdistrictid]),
+      presentUpazila: getValue('office_mapping', 'thana_name', 'thana_id = $1 AND district_id = $2', [row.presentupazilaid, row.presentdistrictid]),
+      mainidType: getValue('payload_data', 'data_name', "data_type = 'cardTypeId' AND data_id = $1", [row.mainidtypeid]),
+      role_name: getValue('role_hierarchies', 'designation', 'projectcode = $1 AND position = $2', [row.projectcode, row.roleid]),
+      reciverrole_name: getValue('role_hierarchies', 'designation', 'projectcode = $1 AND position = $2', [row.projectcode, row.reciverrole]),
+      Comment: getValue('document_history', 'comment', 'id = $1', [row.dochistory_id]),
+      OccupationId: row.occupation,
+      Occupation: getValue('payload_data', 'data_name', "data_type = 'occupationId' AND data_id = $1", [row.occupation]),
+      MaritalStatus: getValue('payload_data', 'data_name', "data_type = 'maritalStatusId' AND data_id = $1", [row.maritalstatusid]),
+      SpuseOccupation: getValue('payload_data', 'data_name', "data_type = 'occupationId' AND data_id = $1", [row.spuseoccupationid]),
+      Gender: getValue('payload_data', 'data_name', "data_type = 'genderId' AND data_id = $1", [row.genderid]),
+      NomineeNidTypeId: row.nomineenidtype,
+      NomineeNidType: getValue('payload_data', 'data_name', "data_type = 'cardTypeId' AND data_id = $1", [row.nomineenidtype]),
+      Relationship: getValue('payload_data', 'data_name', "data_type = 'relationshipId' AND data_id = $1", [row.relationshipid]),
+      IsSameAddress: row.issameaddress === '1' ? 'Yes' : 'No',
+      WalletOwnerId: row.walletowner,
+      WalletOwner: getValue('payload_data', 'data_name', "data_type = 'primaryEarner' AND data_id = $1", [row.walletowner]),
+      rocketNo: row.roket_number,
+      PrimaryEarnerId: row.primaryearner,
+      PrimaryEarner: getValue('payload_data', 'data_name', "data_type = 'primaryEarner' AND data_id = $1", [row.primaryearner])
+    };
 
-    result.mainidType = await getSingleValue('payload_data', 'data_name', "data_type = 'cardTypeId' AND data_id = $1", [result.mainidtypeid]);
-    result.role_name = await getSingleValue('role_hierarchies', 'designation', 'projectcode = $1 AND position = $2', [result.projectcode, result.roleid]);
-    result.reciverrole_name = await getSingleValue('role_hierarchies', 'designation', 'projectcode = $1 AND position = $2', [result.projectcode, result.reciverrole]);
-    result.Comment = await getSingleValue('document_history', 'comment', 'id = $1', [result.dochistory_id]);
-    result.OccupationId = result.occupation;
-    result.Occupation = await getSingleValue('payload_data', 'data_name', "data_type = 'occupationId' AND data_id = $1", [result.occupation]);
-    result.MaritalStatus = await getSingleValue('payload_data', 'data_name', "data_type = 'maritalStatusId' AND data_id = $1", [result.maritalstatusid]);
-    result.SpuseOccupation = await getSingleValue('payload_data', 'data_name', "data_type = 'occupationId' AND data_id = $1", [result.spuseoccupationid]);
-    result.Gender = await getSingleValue('payload_data', 'data_name', "data_type = 'genderId' AND data_id = $1", [result.genderid]);
-    result.NomineeNidTypeId = result.nomineenidtype;
-    result.NomineeNidType = await getSingleValue('payload_data', 'data_name', "data_type = 'cardTypeId' AND data_id = $1", [result.nomineenidtype]);
-    result.Relationship = await getSingleValue('payload_data', 'data_name', "data_type = 'relationshipId' AND data_id = $1", [result.relationshipid]);
-    result.IsSameAddress = result.issameaddress === '1' ? 'Yes' : 'No';
-    result.WalletOwnerId = result.walletowner;
-    result.WalletOwner = await getSingleValue('payload_data', 'data_name', "data_type = 'primaryEarner' AND data_id = $1", [result.walletowner]);
-    result.rocketNo = result.roket_number;
-    result.PrimaryEarnerId = result.primaryearner;
-    result.PrimaryEarner = await getSingleValue('payload_data', 'data_name', "data_type = 'primaryEarner' AND data_id = $1", [result.primaryearner]);
+    // Resolve all async enrichment values
+    const enriched = await Promise.all(
+      Object.entries(enrichments).map(async ([key, val]) => [key, await val])
+    );
 
-    return res.status(200).json({
-      status: 200,
-      data: result,
-      message: ""
-    });
+    // Build final response object
+    for (const [key, val] of enriched) {
+      row[key] = val;
+    }
 
-  } catch (error) {
-    logger.error("Error in GetProfileUpdateData:", error.message);
-    return res.status(500).json({
-      status: 500,
-      data: "",
-      message: "Server error while fetching profile update data."
-    });
+    return res.status(200).json({ status: 200, data: row, message: "" });
+
+  } catch (err) {
+    logger.error("❌ GetProfileUpdateData error:", err.message);
+    return res.status(500).json({ status: 500, data: "", message: "Server error." });
   } finally {
     client.release();
   }
