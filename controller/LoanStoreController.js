@@ -168,7 +168,3 @@ exports.LoanRcaDataStore = async (req, res) => {
         client.release();
     }
 };
-
-
-
-

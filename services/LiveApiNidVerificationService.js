@@ -4,56 +4,38 @@ const TokenCheckService = require('./TokenCheckService');
 const axios = require('axios');
 
 class LiveApiNidVerificationService {
-  constructor() {
-    this.token = null;
-    this.tokenExpiry = null;
-  }
-
   static async execute(req) {
     return await new LiveApiNidVerificationService().nidVerify(req);
   }
 
   async nidVerify(req) {
     try {
-      // 1. Validate request
-      const validation = await this.validateRequest(req);
+      // Validate request
+      const validation = this.validateRequest(req);
       if (validation) return validation;
 
-      // 2. Get server URLs
-      const serverUrls = await ServerURLService.server_url();
-      if (!Array.isArray(serverUrls)) {  // Fixed the missing parenthesis here
-        return this.errorResponse("ERROR", "Invalid server URL configuration");
-      }
-      
-      const [url, url2Raw] = serverUrls;
-      const url2 = url2Raw?.trim() || url;
-
-      // 3. Get or refresh token
-      let serverToken;
-      try {
-        const tokenResult = await TokenCheckService.check_token();
-        serverToken = tokenResult?.token || tokenResult;
-      } catch (tokenError) {
-        console.error('Token check failed:', tokenError);
-        return this.errorResponse("CUSTMSG", "Token Not Found");
-      }
-
-      if (!serverToken) {
-        return this.errorResponse("CUSTMSG", "Token Not Found");
-      }
-
-      // 4. Extract parameters
-      const params = Object.assign({}, req.query, req.body);
-      const { type, IdNo: idno, versionCode = '', voCode: voCode1, orgMemNo, pin, branchCode } = params;
+      // Get parameters
+      const params = { ...req.query, ...req.body };
+      const { type, IdNo: idno, versionCode, voCode, orgMemNo, pin, branchCode } = params;
 
       if (!type || !idno) {
         return this.errorResponse("ERROR", `${!type ? "Type" : "IdNo"} parameter is missing`);
       }
 
-      // 5. Make API call
-      const baseUrl = url2.endsWith('/') ? url2 : `${url2}/`;
+      // Get server URL and token
+      const [serverUrls, serverToken] = await Promise.all([
+        ServerURLService.server_url(),
+        this.getToken()
+      ]);
+
+      if (!Array.isArray(serverUrls)) {
+        return this.errorResponse("ERROR", "Invalid server URL configuration");
+      }
+
+      const baseUrl = (serverUrls[1]?.trim() || serverUrls[0]).replace(/\/$/, '') + '/';
       const apiUrl = `${baseUrl}dedupe-check?${type}=${idno}`;
-      
+
+      // Make API call
       const response = await axios.get(apiUrl, {
         headers: {
           "Content-Type": "application/json",
@@ -62,9 +44,9 @@ class LiveApiNidVerificationService {
         timeout: 60000
       });
 
-      // 6. Process response
-      return this.processResponse(response, { 
-        type, idno, versionCode, voCode1, pin, branchCode 
+      // Process response
+      return this.processResponse(response.data, response.status, { 
+        type, idno, versionCode, voCode, pin, branchCode 
       });
 
     } catch (error) {
@@ -73,54 +55,124 @@ class LiveApiNidVerificationService {
     }
   }
 
-  async processResponse(response, params) {
-    const { data: apiData, status: httpCode } = response;
-    const { type, idno, versionCode, voCode1, pin, branchCode } = params;
+  async getToken() {
+    const tokenResult = await TokenCheckService.check_token();
+    const token = tokenResult?.token || tokenResult;
+    if (!token) throw new Error("Token Not Found");
+    return token;
+  }
 
+  async processResponse(apiData, httpCode, params) {
+    const { type, idno, versionCode, voCode, pin, branchCode } = params;
+    
     if (!apiData) return this.formatResponse(httpCode, type, "", []);
 
-    if (!versionCode) {
-      return this.formatResponse(
-        httpCode, 
-        type, 
-        apiData[type] || idno, 
-        apiData.suspectedMember || ""
-      );
-    }
-
+    const idValue = apiData[type] || idno;
     const suspects = apiData.suspectedMember || [];
-    if (!suspects.length) return this.formatResponse(httpCode, type, apiData[type] || idno, "");
+
+    // Simple response if no version code or no suspects
+    if (!versionCode || !suspects.length) {
+      return this.formatResponse(httpCode, type, idValue, suspects);
+    }
 
     const suspect = suspects[0];
-    if (suspect.branchCode !== branchCode || pin !== suspect.assignedPoPin || suspect.voCode !== voCode1) {
-      const { branchInfo, poInfo, contactInfo } = await this.getSuspectDetails(suspect);
-      
-      const message = `দুঃখিত, আপনার প্রদত্ত এনআইডি/স্মার্টকার্ড/জন্ম নিবন্ধন/পাসপোর্ট নম্বরটি দিয়ে ব্র্যাকের নিম্নোক্ত শাখায় সদস্য ভর্তি আছে।\n\n` +
-        `বিভাগ: ${branchInfo?.division_name}\n` +
-        `অঞ্চল: ${branchInfo?.region_name}\n` +
-        `এলাকা: ${branchInfo?.area_name}\n` +
-        `শাখা: ${branchInfo?.branch_name}\n` +
-        `শাখা কোড: ${suspect.branchCode}\n` +
-        `ভিও কোড: ${suspect.voCode}\n` +
-        `সদস্য নম্বর: ${suspect.memberNo}\n` +
-        `সদস্য নাম: ${suspect.memberName}\n` +
-        `পিও'র নাম: ${poInfo?.coname}\n` +
-        `পিও'র পিন: ${suspect.assignedPoPin}\n` +
-        `শাখায় যোগাযোগের নম্বর:${contactInfo?.official_mobile}`;
-
-      return this.formatResponse(httpCode, type, apiData[type] || idno, message);
+    
+    // Check if suspect matches current branch/pin/vo
+    if (suspect.branchCode === branchCode && 
+        pin === suspect.assignedPoPin && 
+        suspect.voCode === voCode) {
+      return this.formatResponse(httpCode, type, idValue, "");
     }
 
-    return this.formatResponse(httpCode, type, apiData[type] || idno, "");
+    // Generate mismatch message
+    const details = await this.getSuspectDetails(suspect);
+    const message = this.buildMismatchMessage(suspect, details);
+    
+    return this.formatResponse(httpCode, type, idValue, message);
   }
 
   async getSuspectDetails(suspect) {
-    const [branchInfo, poInfo, contactInfo] = await Promise.all([
-      this.getBranchInfo(suspect.branchCode),
-      this.getPoInfo(suspect.assignedPoPin, suspect.branchCode),
-      this.getContactInfo(suspect.branchCode)
-    ]);
-    return { branchInfo, poInfo, contactInfo };
+    try {
+      const [branchInfo, poInfo, contactInfo] = await Promise.all([
+        this.getBranchInfo(suspect.branchCode),
+        this.getPoInfo(suspect.assignedPoPin, suspect.branchCode),
+        this.getContactInfo(suspect.branchCode)
+      ]);
+      return { branchInfo, poInfo, contactInfo };
+    } catch (error) {
+      console.error('Failed to get suspect details:', error);
+      return { branchInfo: null, poInfo: null, contactInfo: null };
+    }
+  }
+
+  buildMismatchMessage(suspect, { branchInfo, poInfo, contactInfo }) {
+    return `দুঃখিত, আপনার প্রদত্ত এনআইডি/স্মার্টকার্ড/জন্ম নিবন্ধন/পাসপোর্ট নম্বরটি দিয়ে ব্র্যাকের নিম্নোক্ত শাখায় সদস্য ভর্তি আছে।
+
+বিভাগ: ${branchInfo?.division_name || 'N/A'}
+অঞ্চল: ${branchInfo?.region_name || 'N/A'}
+এলাকা: ${branchInfo?.area_name || 'N/A'}
+শাখা: ${branchInfo?.branch_name || 'N/A'}
+শাখা কোড: ${suspect.branchCode}
+ভিও কোড: ${suspect.voCode}
+সদস্য নম্বর: ${suspect.memberNo}
+সদস্য নাম: ${suspect.memberName}
+পিও'র নাম: ${poInfo?.coname || 'N/A'}
+পিও'র পিন: ${suspect.assignedPoPin}
+শাখায় যোগাযোগের নম্বর: ${contactInfo?.official_mobile || 'N/A'}`;
+  }
+
+  // Database methods - simplified with better error handling
+  async getBranchInfo(branchcode) {
+    const connection = await this.getDatabaseConnection();
+    try {
+      const [rows] = await connection.execute(
+        `SELECT branch_name, area_name, region_name, division_name 
+         FROM branch 
+         WHERE branch_id = ? AND program_id = 1`,
+        [branchcode]
+      );
+      return rows[0] || null;
+    } finally {
+      await connection.end();
+    }
+  }
+
+  async getPoInfo(po, branchcode) {
+    const connection = await this.getDatabaseConnection();
+    try {
+      const [rows] = await connection.execute(
+        `SELECT coname FROM dcs.polist WHERE cono = ? AND branchcode = ?`,
+        [po, branchcode]
+      );
+      return rows[0] || null;
+    } finally {
+      await connection.end();
+    }
+  }
+
+  async getContactInfo(branchcode) {
+    const connection = await this.getDatabaseConnection();
+    try {
+      const [rows] = await connection.execute(
+        `SELECT official_mobile 
+         FROM dcs.contacts_info 
+         WHERE branchcode = ? AND project = 'Dabi'`,
+        [parseInt(branchcode)]
+      );
+      return rows[0] || null;
+    } finally {
+      await connection.end();
+    }
+  }
+
+  // Utility methods
+  validateRequest(req) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const message = errors.array().map(e => e.msg).join("\n");
+      return this.errorResponse("E", message);
+    }
+    return null;
   }
 
   formatResponse(status, type, idValue, suspectedMember) {
@@ -131,84 +183,21 @@ class LiveApiNidVerificationService {
     return JSON.stringify({ status, message });
   }
 
-  async validateRequest(req) {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      const message = errors.array().map(e => e.msg).join("\n");
-      return this.errorResponse("E", message);
-    }
-    return null;
-  }
-
   handleError(error) {
     if (error.response) {
       return this.formatResponse(
-        error.response.status,
-        "",
-        "",
+        error.response.status, "", "",
         error.response.data?.message || `API Error: ${error.message}`
       );
     }
-    return this.errorResponse(
-      error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' ? "ERROR" : "ERROR",
-      error.code ? `Connection Error: ${error.message}` : `Error: ${error.message}`
-    );
-  }
-
-  // Database methods
-  async getPoInfo(po, branchcode) {
-    try {
-      // Replace with your actual database connection
-      const connection = await this.getDatabaseConnection();
-      const [rows] = await connection.execute(
-        `SELECT coname FROM dcs.polist WHERE cono = ? AND branchcode = ?`,
-        [po, branchcode]
-      );
-      await connection.end();
-      return rows.length > 0 ? rows[0] : null;
-    } catch (error) {
-      console.error('Database query failed for PO info:', error);
-      return null;
-    }
-  }
-
-  async getBranchInfo(branchcode) {
-    try {
-      const connection = await this.getDatabaseConnection();
-      const [rows] = await connection.execute(
-        `SELECT branch_name, area_name, region_name, division_name 
-         FROM branch 
-         WHERE branch_id = ? AND program_id = 1`,
-        [branchcode]
-      );
-      await connection.end();
-      return rows.length > 0 ? rows[0] : null;
-    } catch (error) {
-      console.error('Database query failed for branch info:', error);
-      return null;
-    }
-  }
-
-  async getContactInfo(branchcode) {
-    try {
-      const connection = await this.getDatabaseConnection();
-      const [rows] = await connection.execute(
-        `SELECT official_mobile 
-         FROM dcs.contacts_info 
-         WHERE branchcode = ? AND project = 'Dabi'`,
-        [parseInt(branchcode)]
-      );
-      await connection.end();
-      return rows.length > 0 ? rows[0] : null;
-    } catch (error) {
-      console.error('Database query failed for contact info:', error);
-      return null;
-    }
+    
+    const status = (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') ? "ERROR" : "ERROR";
+    const message = error.code ? `Connection Error: ${error.message}` : `Error: ${error.message}`;
+    return this.errorResponse(status, message);
   }
 
   async getDatabaseConnection() {
     // Implement your database connection logic here
-    // Example: return await mysql.createConnection(config);
     throw new Error('Database connection method not implemented');
   }
 }
